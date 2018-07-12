@@ -11,6 +11,7 @@ otc mrs create-cluster \
 	--subnet-name subnet-automation \
 	--vpc-name vpc-automation \
 	--cluster-name mrstestcluster \
+        --group-name lambdagroup \
 	--debug
 
 # for data streaming 
@@ -19,4 +20,5 @@ otc mrs create-cluster \
 	--subnet-name subnet-automation \
 	--vpc-name vpc-automation \
 	--cluster-name mrstestcluster \
+        --group-name lambdagroup \
 	--debug

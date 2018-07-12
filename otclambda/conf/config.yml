@@ -1,0 +1,17 @@
+
+kafka_data_producer:
+    meta_file: "meta_lambda_alert.csv"
+    broker_list: "192.168.0.122:21005"
+    topic: "test"
+    key_names: ["AB-C 1234", "B-AA 4567", "M-GN 2018", "FFB-AB 1234","GAP-YC 4567", "KL-SM 8912", "BD-AB 9876", "NRW-8 1234", "WES-VR 5432"]
+
+
+lambda_speedlayer:
+    alert_sql_path: "webinar_streaming.sql"
+    broker_list: "192.168.0.122:21005"
+    topic: "test"
+    hbase_host: "node-master2-fAFMl"
+    speed_temp_table: "inboxtemp"
+    speed_inbox_table: "inbox-hbase-lambda"
+    speed_batch_table: "inboxbatchlambda"
+    s3_full_path: 

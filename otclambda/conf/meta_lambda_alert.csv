@@ -1,0 +1,8 @@
+"metrics","value","ent","mod"
+"tire-pressure","3"," 0.5","ltgt"
+"ultrasonic-sensor-front","0.001","0.00009","ltgt"
+"ultrasonic-sensor-back","4.8","4","ltgt"
+"driver-blood-pressure","200","200","ltgt"
+"current-speed","130","50","ltgt"
+"current-location-long","53.0372285","50","ltgt"
+"current-location-lat","8.6004915","0.000001","ltgt"

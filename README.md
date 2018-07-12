@@ -36,15 +36,15 @@ Usage
 
  Kafka Producer 
 
-``$ ./webinar_datagen_kafkaproducer.sh``
+``$ ./runkafka.sh``
 
  Speed Layer
 
-``$ webinar_sparkstreaming_speedlayer.sh``
+``$ runspeed.sh``
 
  Batch Layer
 
-``$ webinar_sparkstreaming_batchlayer.sh``
+``$ runbatch.sh``
 
  
 License

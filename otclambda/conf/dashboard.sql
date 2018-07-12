@@ -7,9 +7,7 @@ GROUP BY name,
 ORDER BY 2,
          1 DESC
 ;
-SELECT name,
-       CREDITCHANGES
-FROM starwarsinbox
+SELECT messagedate, metrics,name,value FROM lambda_data_markt
 ;
 
 

@@ -17,7 +17,12 @@
 # limitations under the License.
 #
 """
- Counts words in UTF8 encoded, '\n' delimited text directly received from Kafka in every 2 seconds.
+Created Date:  June 11 2018
+Author: Zsolt Nagy
+Version: V1.1 ( Automotive - Lambda example  )
+Copyright (c) 2018 T-Systems
+
+ Stream processing of Car Data  UTF8 encoded, '\n' delimited text directly received from Kafka in every 2 seconds.
  Usage: lambda_speedlayer.py <broker_list> <topic>
  """
 from __future__ import print_function
@@ -33,26 +38,32 @@ import datetime
 from pyspark.sql import HiveContext
 from pyspark import SparkFiles
 
+log4jLogger = None
+
 alertsql2 = """
-select s.name,value, alerthealtbloodpresure,alerthealtbloodalcohol,alerthealtbloodsugar,rebelioncreditlimit from 
-   ( select name,metrics,value from starwarstemp ) s 
-left outer join  
-   ( select name,alerthealtbloodpresure,alerthealtbloodalcohol,alerthealtbloodsugar,rebelioncreditlimit from starwars05)  m  on  
+select s.name,value, alerthealtbloodpresure,alerthealtbloodalcohol,alerthealtbloodsugar,rebelioncreditlimit from
+   ( select name,metrics,value from starwarstemp ) s
+left outer join
+   ( select name,alerthealtbloodpresure,alerthealtbloodalcohol,alerthealtbloodsugar,rebelioncreditlimit from starwars05)  m  on
 s.name = m.name
-where 
-    ( (metrics ==  "healt-blood-pulse") and ( int(value) > int( alerthealtbloodpresure) ) ) or 
-   ( (metrics ==  "healt-blood-sugar") and ( int(value) > int( alerthealtbloodsugar) ) ) or 
-   ( (metrics ==  "healt-blood-alcohol") and ( int(value) > int( alerthealtbloodalcohol) ) ) or 
+where
+    ( (metrics ==  "healt-blood-pulse") and ( int(value) > int( alerthealtbloodpresure) ) ) or
+   ( (metrics ==  "healt-blood-sugar") and ( int(value) > int( alerthealtbloodsugar) ) ) or
+   ( (metrics ==  "healt-blood-alcohol") and ( int(value) > int( alerthealtbloodalcohol) ) ) or
    ( (metrics ==  "action-credit-limit") and ( int(value) > int( rebelioncreditlimit) ) )
 """
 
 
 if __name__ == "__main__":
     if len(sys.argv) != 3:
-        print("Usage: direct_kafka_wordcount.py <broker_list> <topic>", file=sys.stderr)
+        print("Usage: lambda_speedlayer.py <broker_list> <topic>", file=sys.stderr)
         exit(-1)
-    sc = SparkContext(appName="PythonStreamingDirectKafkaWordCount")
-    
+    sc = SparkContext(appName="PythonStreamingKafkaLambda")
+    log4jLogger = sc._jvm.org.apache.log4j
+    logging = log4jLogger.LogManager.getLogger(__name__)
+    logging.info("pyspark script logger initialized")
+
+
     ssc = StreamingContext(sc, 1)
     brokers, topic = sys.argv[1:]
     kvs = KafkaUtils.createDirectStream(ssc, [topic], {"metadata.broker.list": brokers})
@@ -66,6 +77,7 @@ if __name__ == "__main__":
             # FIX: memory error Spark 2.0 bug ( < 2.0 )
             sqlContext.setConf("spark.sql.tungsten.enabled","false")
 
+
             # v2.01 spark = SparkSession.builder \
             #.master("local") \
             #.appName("Word Count") \
@@ -78,13 +90,29 @@ if __name__ == "__main__":
                 return;
 
             # Convert RDD[String] to RDD[Row] to DataFrame
-            sqlRdd = rdd.map( lambda x: json.loads(x)).map(lambda r: Row( metrics=r["metrics"], name=r["name"], value=r["value"] ) )
-            wordsDataFrame = sqlContext.createDataFrame(sqlRdd)
+            # vs
+            ##NZS~~wordsDataFrame = sqlContext.read.json( rdd )
+            #return;
+
+            # vs
+            #wordsDataFrame = sqlContext.read.json( rdd.map( lambda x: json.loads(x)) )
+            spark = SparkSession(sc)
+            wordsDataFrame = sqlContext.read.json( rdd.map( lambda x: x.json) )
             wordsDataFrame.show()
-            # Creates a temporary view using the DataFrame.			
-            wordsDataFrame.registerTempTable("starwarstemp")
-            # Creates a query and get the alam dataset using the temp table 
-            wordCountsDataFrame = sqlContext.sql("select * from  starwarstemp")
+            return
+
+            # !!!!!#########!!!!! RETURN BELETEVE
+
+            # vs
+            ##NZS~~~~sqlRdd = rdd.map( lambda x: json.loads(x)).map(lambda r: Row( metrics=r["metrics"], name=r["name"], value=r["value"] ) )
+            ##wordsDataFrame = sqlContext.createDataFrame(sqlRdd)
+
+
+            wordsDataFrame.show()
+            # Creates a temporary view using the DataFrame.
+            wordsDataFrame.registerTempTable("carstemp")
+            # Creates a query and get the alam dataset using the temp table
+            wordCountsDataFrame = sqlContext.sql("select * from  carstemp")
             wordCountsDataFrame.printSchema()
 
 
@@ -92,17 +120,17 @@ if __name__ == "__main__":
                 alertsql=test_file.read()
                 #logging.info(alertsql)
 
-            alertDataFrame = sqlContext.sql(alertsql)			
+            alertDataFrame = sqlContext.sql(alertsql)
             alertDataFrame.show()
-            alertDataFrame.printSchema()			
+            alertDataFrame.printSchema()
 
-            # save all values to HBASE 
+            # save all values to HBASE
             # IF NEED FILTER LATER .filter(lambda x: str(x["metrics"])=='action-credit-limit') \
-            # create HBASE mapper 
+            # create HBASE mapper
             rowRdd = rdd.map( lambda x: json.loads(x))\
                 .map(lambda r: ( str(r["metrics"]) ,[ str(r["name"])+"-"+datetime.datetime.now().strftime("%Y%m%d%H%M%S"), "action" if str(r["metrics"])=="action-credit-limit" else  "healt", str(r["metrics"]), str(r["value"])] ))
-            
-            table = 'starwarsinbox'
+
+            table = 'carsinbox'
             host = 'node-master2-KcVkz'
             keyConv = "org.apache.spark.examples.pythonconverters.StringToImmutableBytesWritableConverter"
             valueConv = "org.apache.spark.examples.pythonconverters.StringListToPutConverter"
@@ -112,12 +140,13 @@ if __name__ == "__main__":
             "mapreduce.job.output.key.class": "org.apache.hadoop.hbase.io.ImmutableBytesWritable",
             "mapreduce.job.output.value.class": "org.apache.hadoop.io.Writable"}
             rowRdd.saveAsNewAPIHadoopDataset(conf=conf,keyConverter=keyConv,valueConverter=valueConv)
-        except Exception as merror:
-            print (merror)
+        except Exception as streamerror:
+            print (streamerror)
+            logging.error( "Stream error:",streamerror )
+            print (streamerror)
             raise
 
     lines.foreachRDD(process)
     lines.pprint()
     ssc.start()
     ssc.awaitTermination()
-

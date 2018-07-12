@@ -23,6 +23,7 @@ sdist/
 var/
 *.egg-info/
 .installed.cfg
+*.code-workspace
 *.egg
 doc/
 # PyInstaller
