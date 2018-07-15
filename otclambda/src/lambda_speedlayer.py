@@ -22,11 +22,17 @@ Author: Zsolt Nagy
 Version: V1.1 ( Automotive - Lambda example  )
 Copyright (c) 2018 T-Systems
 
- Stream processing of Car Data  UTF8 encoded, '\n' delimited text directly received from Kafka in every 2 seconds.
- Usage: lambda_speedlayer.py <broker_list> <topic>
+ Stream processing of Connected Car Data 
+Operation:
+ 1. UTF8 encoded, JSON DATA  received from Kafka in every 1 seconds.
+ 2. Data converterted to DF and registered TEMP Hive Table 
+ 3. Alarm SQL executed in current windows dataset  if alarm adding to ALARM TABLE
+ 4. All data save to HIVE EXTERNAL TABLE (Hive or OBS(S3) for later batch processing  
+ Usage: lambda_speedlayer.py
  """
 from __future__ import print_function
 import sys
+import os
 from pyspark import SparkContext
 from pyspark.streaming import StreamingContext
 from pyspark.streaming.kafka import KafkaUtils
@@ -38,21 +44,39 @@ import datetime
 from pyspark.sql import HiveContext
 from pyspark import SparkFiles
 
-log4jLogger = sc._jvm.org.apache.log4j
+log4jLogger = None 
+from lambda_config import Config
+
+config = Config()
+
+def load_resource_file(res_file):
+    res_file = os.path.join(os.path.dirname(os.path.realpath(__file__)) , "../conf", res_file )
+    with open(res_file, 'r') as tfile:
+         ret = tfile.read()
+    return ret
+
+
+def load_resource_file_from_spark_file(res_file_name):
+    with open(SparkFiles.get(res_file_name)) as test_file:
+        alertsql=test_file.read()
+    return alertsql
 
 
 if __name__ == "__main__":
-    if len(sys.argv) != 3:
-        print("Usage: lambda_speedlayer.py <broker_list> <topic>", file=sys.stderr)
+    if len(sys.argv) > 1:
+        print("Usage: bin/runspeed.sh", file=sys.stderr)
         exit(-1)
     sc = SparkContext(appName="PythonStreamingKafkaLambda")
-
+    log4jLogger = sc._jvm.org.apache.log4j
     logging = log4jLogger.LogManager.getLogger(__name__)
     logging.info("pyspark script logger initialized")
 
-
     ssc = StreamingContext(sc, 1)
-    brokers, topic = sys.argv[1:]
+    
+    # gets broksers and topic from config 
+    brokers=config.get_lambda_config("kafka_data_producer","broker_list")
+    topic=config.get_lambda_config("kafka_data_producer","topic")
+    # Streaming context getting data Car JSON data from specific topic 
     kvs = KafkaUtils.createDirectStream(ssc, [topic], {"metadata.broker.list": brokers})
     lines = kvs.map(lambda x: x[1])
 
@@ -64,53 +88,46 @@ if __name__ == "__main__":
             # FIX: memory error Spark 2.0 bug ( < 2.0 )
             sqlContext.setConf("spark.sql.tungsten.enabled","false")
 
-
-            # v2.01 spark = SparkSession.builder \
-            #.master("local") \
-            #.appName("Word Count") \
-            #.config("spark.some.config.option", "some-value") \
-            #.getOrCreate()
-            # Get the singleton instance of SparkSession
-            #nzs v1.0 spark = getSparkSessionInstance(rdd.context.getConf())
-
             if rdd.count() < 1:
                 return;
 
-            # Convert RDD[String] to RDD[Row] to DataFrame
-            # vs1 
-            #wordsDataFrame = sqlContext.read.json( rdd )
-            # vs2
-            #wordsDataFrame = sqlContext.read.json( rdd.map( lambda x: json.loads(x)) )
-            #spark = SparkSession(sc)
-            # vs3 
-            sqlRdd = rdd.map( lambda x: json.loads(x)).map(lambda r: Row( metrics=r["metrics"], name=r["name"], value=r["value"], value=r["messageid"], value=r["messagedate"] ) )
-            wordsDataFrame = sqlContext.createDataFrame(sqlRdd)
+            sqlRdd = rdd.map( lambda x: json.loads(x)).map(lambda r: Row( messageid=r["messageid"], messagedate=datetime.datetime.strptime(r["messagedate"], '%Y%m%d%H%M%S'), value=r["value"], metrics=r["metrics"], name=r["name"] ) )
+            speedDataFrame = sqlContext.createDataFrame(sqlRdd)
 
+            batch_table_name=config.get_lambda_config(  "lambda_speedlayer","speed_batch_table")
+            speedDataFrame.write.mode("append").saveAsTable(batch_table_name)
 
-            wordsDataFrame.show()
-            # Creates a temporary view using the DataFrame.			
-            wordsDataFrame.registerTempTable("carstemp")
-            # Creates a query and get the alam dataset using the temp table 
-            wordCountsDataFrame = sqlContext.sql("select * from  carstemp")
-            wordCountsDataFrame.printSchema()
+            # if S3 vals defined then save also to OBS (s3)
+            s3_full_path=config.get_lambda_config(  "lambda_speedlayer","s3_full_path")
+            if s3_full_path and False:
+                speedDataFrame.write.parquet(s3_full_path,mode="append")
 
+            speedDataFrame.show()
+            # Creates a temporary view using the DataFrame.
+            temp_table_name=config.get_lambda_config(  "lambda_speedlayer","speed_temp_table")
+            speedDataFrame.registerTempTable(temp_table_name)
 
-            with open(SparkFiles.get('webinar_streaming.sql')) as test_file:
-                alertsql=test_file.read()
-                #logging.info(alertsql)
-
-            alertDataFrame = sqlContext.sql(alertsql)			
-            alertDataFrame.show()
-            alertDataFrame.printSchema()			
-
-            # save all values to HBASE 
-            # IF NEED FILTER LATER .filter(lambda x: str(x["metrics"])=='action-credit-limit') \
-            # create HBASE mapper 
-            rowRdd = rdd.map( lambda x: json.loads(x))\
-                .map(lambda r: ( str(r["metrics"]) ,[ str(r["name"])+"-"+datetime.datetime.now().strftime("%Y%m%d%H%M%S"), "action" if str(r["metrics"])=="action-credit-limit" else  "healt", str(r["metrics"]), str(r["value"])] ))
+            if __debug__:
+                speedDataFrame.printSchema()
+                speedDataFrame.head( 10 )
+                
+            # handling sql alert file
+            alertsqlfile=config.get_lambda_config(  "lambda_speedlayer","alert_sql_path")
             
-            table = 'carsinbox'
-            host = 'node-master2-KcVkz'
+            alertsql = load_resource_file( alertsqlfile )
+            # Execute alarm query and get the alam dataset using the temp table
+            alertDataFrame = sqlContext.sql(alertsql)
+            alertDataFrame.show()
+            alertDataFrame.printSchema()
+
+            # save all values to HBASE
+            # IF NEED FILTER LATER .filter(lambda x: str(x["metrics"])=='action-credit-limit') \
+            # create HBASE mapper
+            rowRdd = rdd.map( lambda x: json.loads(x))\
+                .map(lambda r: ( str(r["metrics"]) ,[ str(r["name"])+"-"+datetime.datetime.now().strftime("%Y%m%d%H%M%S"), "driver" if "driver" in str(r["metrics"]) else "car", str(r["metrics"]), str(r["value"])  ] ))
+
+            table = config.get_lambda_config(  "lambda_speedlayer","speed_inbox_table")
+            host = config.get_lambda_config(  "lambda_speedlayer","hbase_host")
             keyConv = "org.apache.spark.examples.pythonconverters.StringToImmutableBytesWritableConverter"
             valueConv = "org.apache.spark.examples.pythonconverters.StringListToPutConverter"
             conf = {"hbase.zookeeper.quorum": host,
