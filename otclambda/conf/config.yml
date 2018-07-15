@@ -8,8 +8,6 @@ kafka_data_producer:
 
 lambda_speedlayer:
     alert_sql_path: "webinar_streaming.sql"
-    broker_list: "192.168.0.122:21005"
-    topic: "test"
     hbase_host: "node-master2-fAFMl"
     speed_temp_table: "inboxtemp"
     speed_inbox_table: "inbox-hbase-lambda"
